@@ -43,7 +43,7 @@ export function SettingsModal({
     e.preventDefault();
     onSave({
       ...draft,
-      modelOverride: draft.modelOverride.trim() || 'gemini-2.5-flash',
+      modelOverride: draft.modelOverride.trim() || 'gemini-3.8-flash',
     });
     onClose();
   };
@@ -151,7 +151,7 @@ export function SettingsModal({
                   onChange={(e) =>
                     setDraft({ ...draft, modelOverride: e.target.value })
                   }
-                  placeholder="gemini-2.5-flash"
+                  placeholder="gemini-3.8-flash"
                   className="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 font-mono text-xs text-emerald-300 placeholder-slate-600 focus:border-emerald-500 focus:outline-none"
                 />
               </label>

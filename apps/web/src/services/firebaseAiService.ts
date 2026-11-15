@@ -70,35 +70,57 @@ export interface NanoScanWithAuditResult {
 
 let cachedApp: FirebaseApp | null = null;
 let cachedAi: AI | null = null;
-let currentModelName = 'gemini-2.5-flash';
+let currentModelName = 'gemini-3.8-flash';
 let currentConnectionState: FirebaseConnectionState = {
   connected: false,
   appCheckActive: false,
   remoteConfigSynced: false,
-  activeModel: 'gemini-2.5-flash',
+  activeModel: 'gemini-3.8-flash',
 };
 
 const CONFIG_STORAGE_KEY = 'safepaste_firebase_config_v1';
 
 export function getDefaultFirebaseConfig(): FirebaseUserConfig {
+  const env =
+    (import.meta as unknown as { env?: Record<string, string | undefined> }).env ?? {};
   return {
-    apiKey: '',
-    projectId: '',
-    appId: '',
-    appCheckDebugToken: '',
-    useDebugAppCheck: true,
-    recaptchaSiteKey: '',
-    modelOverride: 'gemini-2.5-flash',
+    apiKey: env.VITE_FIREBASE_API_KEY?.trim() || '',
+    projectId: env.VITE_FIREBASE_PROJECT_ID?.trim() || '',
+    appId: env.VITE_FIREBASE_APP_ID?.trim() || '',
+    appCheckDebugToken: env.VITE_FIREBASE_APPCHECK_DEBUG_TOKEN?.trim() || '',
+    useDebugAppCheck: env.VITE_FIREBASE_USE_DEBUG_APPCHECK === 'true',
+    recaptchaSiteKey: env.VITE_FIREBASE_RECAPTCHA_SITE_KEY?.trim() || '',
+    modelOverride: env.VITE_FIREBASE_MODEL_OVERRIDE?.trim() || 'gemini-3.8-flash',
   };
 }
 
 export function loadSavedFirebaseConfig(): FirebaseUserConfig {
+  const defaults = getDefaultFirebaseConfig();
   try {
     const raw = localStorage.getItem(CONFIG_STORAGE_KEY);
-    if (!raw) return getDefaultFirebaseConfig();
-    return { ...getDefaultFirebaseConfig(), ...JSON.parse(raw) };
+    if (!raw) return defaults;
+    const parsed = JSON.parse(raw) as Partial<FirebaseUserConfig>;
+    return {
+      ...defaults,
+      ...parsed,
+      apiKey: parsed.apiKey?.trim() ? parsed.apiKey : defaults.apiKey,
+      projectId: parsed.projectId?.trim() ? parsed.projectId : defaults.projectId,
+      appId: parsed.appId?.trim() ? parsed.appId : defaults.appId,
+      recaptchaSiteKey: parsed.recaptchaSiteKey?.trim()
+        ? parsed.recaptchaSiteKey
+        : defaults.recaptchaSiteKey,
+      appCheckDebugToken: parsed.appCheckDebugToken?.trim()
+        ? parsed.appCheckDebugToken
+        : defaults.appCheckDebugToken,
+      useDebugAppCheck: parsed.appCheckDebugToken?.trim()
+        ? Boolean(parsed.useDebugAppCheck)
+        : defaults.useDebugAppCheck,
+      modelOverride: parsed.modelOverride?.trim()
+        ? parsed.modelOverride
+        : defaults.modelOverride,
+    };
   } catch {
-    return getDefaultFirebaseConfig();
+    return defaults;
   }
 }
 
@@ -156,7 +178,7 @@ export async function checkNanoAvailability(): Promise<NanoAvailability> {
 export async function initFirebaseServices(
   config: FirebaseUserConfig
 ): Promise<FirebaseConnectionState> {
-  const targetModel = config.modelOverride?.trim() || 'gemini-2.5-flash';
+  const targetModel = config.modelOverride?.trim() || 'gemini-3.8-flash';
   currentModelName = targetModel;
 
   if (!config.apiKey.trim() || !config.projectId.trim() || !config.appId.trim()) {
@@ -177,6 +199,16 @@ export async function initFirebaseServices(
       await deleteApp(app);
     }
 
+    const hasRecaptcha = Boolean(config.recaptchaSiteKey.trim());
+    const hasDebugToken = Boolean(
+      config.useDebugAppCheck && config.appCheckDebugToken.trim()
+    );
+
+    if (config.useDebugAppCheck) {
+      (self as unknown as Record<string, unknown>).FIREBASE_APPCHECK_DEBUG_TOKEN =
+        config.appCheckDebugToken.trim() || true;
+    }
+
     cachedApp = initializeApp({
       apiKey: config.apiKey.trim(),
       projectId: config.projectId.trim(),
@@ -184,22 +216,24 @@ export async function initFirebaseServices(
     });
 
     let appCheckActive = false;
-    try {
-      if (config.useDebugAppCheck) {
-        (self as unknown as Record<string, unknown>).FIREBASE_APPCHECK_DEBUG_TOKEN =
-          config.appCheckDebugToken.trim() || true;
+    if (hasRecaptcha || hasDebugToken) {
+      try {
+        if (config.useDebugAppCheck) {
+          (self as unknown as Record<string, unknown>).FIREBASE_APPCHECK_DEBUG_TOKEN =
+            config.appCheckDebugToken.trim() || true;
+        }
+
+        const siteKey =
+          config.recaptchaSiteKey.trim() || '6LeIxAcTAAAAAJcZVRqyHh71UMIEGNQ_MXjiZKhI';
+
+        initializeAppCheck(cachedApp, {
+          provider: new ReCaptchaEnterpriseProvider(siteKey),
+          isTokenAutoRefreshEnabled: true,
+        });
+        appCheckActive = true;
+      } catch {
+        appCheckActive = false;
       }
-
-      const siteKey =
-        config.recaptchaSiteKey.trim() || '6LeIxAcTAAAAAJcZVRqyHh71UMIEGNQ_MXjiZKhI';
-
-      initializeAppCheck(cachedApp, {
-        provider: new ReCaptchaEnterpriseProvider(siteKey),
-        isTokenAutoRefreshEnabled: true,
-      });
-      appCheckActive = true;
-    } catch {
-      appCheckActive = false;
     }
 
     let remoteConfigSynced = false;
@@ -375,60 +409,95 @@ export async function runHybridWorkspaceTask(
 
   // Path 1: Official Firebase AI Logic SDK (Hybrid Inference)
   if (cachedAi) {
-    const firebaseMode =
-      modeSelection === 'ONLY_ON_DEVICE'
-        ? InferenceMode.ONLY_ON_DEVICE
-        : modeSelection === 'ONLY_IN_CLOUD'
-          ? InferenceMode.ONLY_IN_CLOUD
-          : InferenceMode.PREFER_ON_DEVICE;
+    try {
+      const firebaseMode =
+        modeSelection === 'ONLY_ON_DEVICE'
+          ? InferenceMode.ONLY_ON_DEVICE
+          : modeSelection === 'ONLY_IN_CLOUD'
+            ? InferenceMode.ONLY_IN_CLOUD
+            : InferenceMode.PREFER_ON_DEVICE;
 
-    const hybridParams: HybridParams = {
-      mode: firebaseMode,
-      onDeviceParams: {
-        createOptions: {
-          initialPrompts: [
-            {
-              role: 'system',
-              content: [{ type: 'text', value: SafePasteEngine.getSystemInstruction() }],
-            },
-          ],
+      const cloudParams: HybridParams = {
+        mode: InferenceMode.ONLY_IN_CLOUD,
+        inCloudParams: {
+          model: currentModelName,
+          systemInstruction: SafePasteEngine.getSystemInstruction(),
         },
-      },
-      inCloudParams: {
-        model: currentModelName,
-        systemInstruction: SafePasteEngine.getSystemInstruction(),
-      },
-    };
+      };
 
-    const model = getGenerativeModel(cachedAi, hybridParams);
-    const result = await model.generateContent(fullTaskPrompt);
-    const outputText = result.response.text();
-    const latencyMs = Math.round((performance.now() - start) * 100) / 100;
+      const hybridParams: HybridParams = {
+        mode: firebaseMode,
+        onDeviceParams: {
+          createOptions: {
+            initialPrompts: [
+              {
+                role: 'system',
+                content: [{ type: 'text', value: SafePasteEngine.getSystemInstruction() }],
+              },
+            ],
+            expectedInputs: [{ type: 'text', languages: ['en'] }],
+            expectedOutputs: [{ type: 'text', languages: ['en'] }],
+          },
+        },
+        inCloudParams: cloudParams.inCloudParams,
+      };
 
-    // Inspect actual inference source reported by Firebase AI Logic SDK (never hardcoded!)
-    const ranOnDevice = result.response.inferenceSource === InferenceSource.ON_DEVICE;
-    const executionSource: ExecutionSource = ranOnDevice
-      ? 'FIREBASE_HYBRID_ON_DEVICE'
-      : 'FIREBASE_CLOUD_GEMINI';
+      const runHybridCall = async () => {
+        const model = getGenerativeModel(cachedAi!, hybridParams);
+        if (modeSelection !== 'PREFER_ON_DEVICE') {
+          return await model.generateContent(fullTaskPrompt);
+        }
 
-    const auditEntry: NetworkAuditEntry = {
-      id: createAuditId(),
-      timestamp: new Date().toISOString(),
-      stage: 'HYBRID_INFERENCE',
-      mode: modeSelection,
-      executionSource,
-      endpoint: ranOnDevice
-        ? 'local://firebase-ai-hybrid (Chrome Gemini Nano)'
-        : 'https://firebasevertexai.googleapis.com (Firebase AI Logic + App Check)',
-      outboundPayload: sanitizedPrompt,
-      rawSecretsChecked: leakageCheck.rawSecretsChecked,
-      leakedSecretsFound: [],
-      zeroLeakageVerified: true,
-      latencyMs,
-      modelName: ranOnDevice ? 'gemini-nano' : currentModelName,
-    };
+        let timeoutHandle: ReturnType<typeof setTimeout> | undefined;
+        try {
+          const timeoutPromise = new Promise<never>((_resolve, reject) => {
+            timeoutHandle = setTimeout(
+              () => reject(new Error('Firebase on-device hybrid call timed out after 12s')),
+              12_000
+            );
+          });
+          return await Promise.race([model.generateContent(fullTaskPrompt), timeoutPromise]);
+        } catch {
+          const cloudModel = getGenerativeModel(cachedAi!, cloudParams);
+          return await cloudModel.generateContent(fullTaskPrompt);
+        } finally {
+          if (timeoutHandle !== undefined) clearTimeout(timeoutHandle);
+        }
+      };
 
-    return { outputText, executionSource, latencyMs, auditEntry };
+      const result = await runHybridCall();
+      const outputText = result.response.text();
+      const latencyMs = Math.round((performance.now() - start) * 100) / 100;
+
+      // Inspect actual inference source reported by Firebase AI Logic SDK (never hardcoded!)
+      const ranOnDevice = result.response.inferenceSource === InferenceSource.ON_DEVICE;
+      const executionSource: ExecutionSource = ranOnDevice
+        ? 'FIREBASE_HYBRID_ON_DEVICE'
+        : 'FIREBASE_CLOUD_GEMINI';
+
+      const auditEntry: NetworkAuditEntry = {
+        id: createAuditId(),
+        timestamp: new Date().toISOString(),
+        stage: 'HYBRID_INFERENCE',
+        mode: modeSelection,
+        executionSource,
+        endpoint: ranOnDevice
+          ? 'local://firebase-ai-hybrid (Chrome Gemini Nano)'
+          : 'https://firebasevertexai.googleapis.com (Firebase AI Logic + App Check)',
+        outboundPayload: sanitizedPrompt,
+        rawSecretsChecked: leakageCheck.rawSecretsChecked,
+        leakedSecretsFound: [],
+        zeroLeakageVerified: true,
+        latencyMs,
+        modelName: ranOnDevice ? 'gemini-nano' : currentModelName,
+      };
+
+      return { outputText, executionSource, latencyMs, auditEntry };
+    } catch (firebaseErr) {
+      if (modeSelection === 'ONLY_IN_CLOUD') {
+        throw firebaseErr;
+      }
+    }
   }
 
   // Path 2: Direct Chrome Built-in Gemini Nano when Firebase API key is not configured
