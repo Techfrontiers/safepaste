@@ -42,6 +42,11 @@ function openDatabase(): Promise<IDBDatabase | null> {
   }
 
   return new Promise((resolve) => {
+    const timer = setTimeout(() => resolve(null), 1500);
+    const finish = (db: IDBDatabase | null) => {
+      clearTimeout(timer);
+      resolve(db);
+    };
     try {
       const request = indexedDB.open(DB_NAME, DB_VERSION);
       request.onupgradeneeded = () => {
@@ -50,10 +55,11 @@ function openDatabase(): Promise<IDBDatabase | null> {
           db.createObjectStore(STORE_NAME);
         }
       };
-      request.onsuccess = () => resolve(request.result);
-      request.onerror = () => resolve(null);
+      request.onsuccess = () => finish(request.result);
+      request.onerror = () => finish(null);
+      request.onblocked = () => finish(null);
     } catch {
-      resolve(null);
+      finish(null);
     }
   });
 }

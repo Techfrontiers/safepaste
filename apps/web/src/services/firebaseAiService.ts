@@ -453,45 +453,73 @@ export async function runHybridWorkspaceTask(
 
     const lm = win.LanguageModel || win.ai?.languageModel;
     if (lm) {
-      let session: { prompt: (input: string) => Promise<string>; destroy: () => void };
+      let timeoutHandle: ReturnType<typeof setTimeout> | undefined;
+      let session: { prompt: (input: string) => Promise<string>; destroy: () => void } | undefined;
+
       try {
-        session = await lm.create({
-          initialPrompts: [
-            { role: 'system', content: SafePasteEngine.getSystemInstruction() },
-          ],
-          expectedInputs: [{ type: 'text', languages: ['en'] }],
-          expectedOutputs: [{ type: 'text', languages: ['en'] }],
+        const runNanoTask = async (): Promise<string> => {
+          try {
+            session = await lm.create({
+              initialPrompts: [
+                { role: 'system', content: SafePasteEngine.getSystemInstruction() },
+              ],
+              expectedInputs: [{ type: 'text', languages: ['en'] }],
+              expectedOutputs: [{ type: 'text', languages: ['en'] }],
+            });
+          } catch {
+            session = await lm.create({
+              systemPrompt: SafePasteEngine.getSystemInstruction(),
+            });
+          }
+          return await session.prompt(fullTaskPrompt);
+        };
+
+        const timeoutPromise = new Promise<never>((_resolve, reject) => {
+          timeoutHandle = setTimeout(
+            () => reject(new Error('Chrome Gemini Nano inference timed out after 15s')),
+            15_000
+          );
         });
-      } catch {
-        session = await lm.create({
-          systemPrompt: SafePasteEngine.getSystemInstruction(),
-        });
+
+        const outputText = await Promise.race([runNanoTask(), timeoutPromise]);
+        const latencyMs = Math.round((performance.now() - start) * 100) / 100;
+
+        const auditEntry: NetworkAuditEntry = {
+          id: createAuditId(),
+          timestamp: new Date().toISOString(),
+          stage: 'HYBRID_INFERENCE',
+          mode: modeSelection,
+          executionSource: 'GEMINI_NANO_ON_DEVICE',
+          endpoint: 'local://chrome-prompt-api-nano (On-Device)',
+          outboundPayload: sanitizedPrompt,
+          rawSecretsChecked: leakageCheck.rawSecretsChecked,
+          leakedSecretsFound: [],
+          zeroLeakageVerified: true,
+          latencyMs,
+          modelName: 'gemini-nano',
+        };
+
+        return {
+          outputText,
+          executionSource: 'GEMINI_NANO_ON_DEVICE',
+          latencyMs,
+          auditEntry,
+        };
+      } catch (nanoErr) {
+        if (modeSelection === 'ONLY_ON_DEVICE') {
+          throw nanoErr;
+        }
+        // Under PREFER_ON_DEVICE without Firebase keys, fall back transparently to Sandbox Simulation
+      } finally {
+        if (timeoutHandle !== undefined) {
+          clearTimeout(timeoutHandle);
+        }
+        try {
+          session?.destroy();
+        } catch {
+          // Ignore
+        }
       }
-      const outputText = await session.prompt(fullTaskPrompt);
-      session.destroy();
-      const latencyMs = Math.round((performance.now() - start) * 100) / 100;
-
-      const auditEntry: NetworkAuditEntry = {
-        id: createAuditId(),
-        timestamp: new Date().toISOString(),
-        stage: 'HYBRID_INFERENCE',
-        mode: modeSelection,
-        executionSource: 'GEMINI_NANO_ON_DEVICE',
-        endpoint: 'local://chrome-prompt-api-nano (On-Device)',
-        outboundPayload: sanitizedPrompt,
-        rawSecretsChecked: leakageCheck.rawSecretsChecked,
-        leakedSecretsFound: [],
-        zeroLeakageVerified: true,
-        latencyMs,
-        modelName: 'gemini-nano',
-      };
-
-      return {
-        outputText,
-        executionSource: 'GEMINI_NANO_ON_DEVICE',
-        latencyMs,
-        auditEntry,
-      };
     }
   }
 

@@ -80,28 +80,45 @@ export class NanoSemanticDetector implements ISemanticDetector {
       return heuristics;
     }
 
+    let timeoutHandle: ReturnType<typeof setTimeout> | undefined;
+    let activeSession: PromptApiSession | undefined;
+
     try {
       const lm = this.windowObj?.LanguageModel || this.windowObj?.ai?.languageModel;
       if (!lm) return heuristics;
 
-      let session: PromptApiSession;
-      try {
-        session = await lm.create({
-          initialPrompts: [{ role: 'system', content: SEMANTIC_SYSTEM_PROMPT }],
-          expectedInputs: [{ type: 'text', languages: ['en'] }],
-          expectedOutputs: [{ type: 'text', languages: ['en'] }],
-        });
-      } catch {
-        session = await lm.create({ systemPrompt: SEMANTIC_SYSTEM_PROMPT });
-      }
+      const runNanoTask = async (): Promise<DetectedEntity[]> => {
+        try {
+          activeSession = await lm.create({
+            initialPrompts: [{ role: 'system', content: SEMANTIC_SYSTEM_PROMPT }],
+            expectedInputs: [{ type: 'text', languages: ['en'] }],
+            expectedOutputs: [{ type: 'text', languages: ['en'] }],
+          });
+        } catch {
+          activeSession = await lm.create({ systemPrompt: SEMANTIC_SYSTEM_PROMPT });
+        }
 
-      const rawResponse = await session.prompt(text);
-      session.destroy();
+        const rawResponse = await activeSession.prompt(text);
+        const nanoEntities = this.parseNanoResponse(text, rawResponse);
+        return [...nanoEntities, ...heuristics];
+      };
 
-      const nanoEntities = this.parseNanoResponse(text, rawResponse);
-      return [...nanoEntities, ...heuristics];
+      const timeoutPromise = new Promise<DetectedEntity[]>((resolve) => {
+        timeoutHandle = setTimeout(() => resolve(heuristics), 8000);
+      });
+
+      return await Promise.race([runNanoTask(), timeoutPromise]);
     } catch {
       return heuristics;
+    } finally {
+      if (timeoutHandle !== undefined) {
+        clearTimeout(timeoutHandle);
+      }
+      try {
+        activeSession?.destroy();
+      } catch {
+        // Ignore cleanup errors
+      }
     }
   }
 
