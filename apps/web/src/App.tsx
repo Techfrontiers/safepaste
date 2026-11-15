@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   AlertTriangle,
   ArrowRight,
@@ -35,6 +35,7 @@ import {
   checkNanoAvailability,
   clearSavedFirebaseConfig,
   initFirebaseServices,
+  isNanoReady,
   loadSavedFirebaseConfig,
   runContextualNanoScan,
   runHybridWorkspaceTask,
@@ -260,8 +261,12 @@ export default function App() {
     [rawText, customTerms]
   );
 
+  const didInitRef = useRef(false);
+
   // Initialize diagnostics, Firebase, IndexedDB stats, and initial scan on mount
   useEffect(() => {
+    if (didInitRef.current) return;
+    didInitRef.current = true;
     void checkNanoAvailability().then(setNanoStatus);
     void initFirebaseServices(firebaseConfig).then(setFirebaseState);
     void getPrivacyStats().then(setPrivacyStats);
@@ -471,7 +476,7 @@ export default function App() {
             <div
               title="Chrome Built-in Prompt API (Gemini Nano)"
               className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 font-medium ${
-                nanoStatus === 'readily'
+                isNanoReady(nanoStatus)
                   ? 'border-cyan-500/30 bg-cyan-500/10 text-cyan-300'
                   : 'border-slate-700 bg-slate-900 text-slate-300'
               }`}
@@ -479,9 +484,11 @@ export default function App() {
               <Cpu className="h-3.5 w-3.5" />
               <span>
                 Gemini Nano:{' '}
-                {nanoStatus === 'readily'
-                  ? 'Ready'
-                  : nanoStatus === 'after-download'
+                {isNanoReady(nanoStatus)
+                  ? 'Ready (On-Device)'
+                  : nanoStatus === 'after-download' ||
+                      nanoStatus === 'downloadable' ||
+                      nanoStatus === 'downloading'
                     ? 'Download Needed'
                     : 'Offline Heuristic'}
               </span>

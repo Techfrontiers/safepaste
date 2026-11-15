@@ -5,16 +5,32 @@ export interface PromptApiSession {
   destroy(): void;
 }
 
+export type PromptApiAvailability =
+  | 'readily'
+  | 'available'
+  | 'after-download'
+  | 'downloadable'
+  | 'downloading'
+  | 'no'
+  | 'unavailable';
+
+export interface PromptApiCreateOptions {
+  systemPrompt?: string;
+  initialPrompts?: Array<{ role: 'system' | 'user' | 'assistant'; content: string }>;
+  expectedInputs?: Array<{ type: 'text'; languages?: string[] }>;
+  expectedOutputs?: Array<{ type: 'text'; languages?: string[] }>;
+}
+
 export interface PromptApiWindow {
   ai?: {
     languageModel?: {
-      availability(): Promise<'readily' | 'after-download' | 'no'>;
-      create(options?: { systemPrompt?: string }): Promise<PromptApiSession>;
+      availability(): Promise<PromptApiAvailability>;
+      create(options?: PromptApiCreateOptions): Promise<PromptApiSession>;
     };
   };
   LanguageModel?: {
-    availability(): Promise<'readily' | 'after-download' | 'no'>;
-    create(options?: { systemPrompt?: string }): Promise<PromptApiSession>;
+    availability(): Promise<PromptApiAvailability>;
+    create(options?: PromptApiCreateOptions): Promise<PromptApiSession>;
   };
 }
 
@@ -50,30 +66,42 @@ export class NanoSemanticDetector implements ISemanticDetector {
       const lm = this.windowObj.LanguageModel || this.windowObj.ai?.languageModel;
       if (!lm) return false;
       const status = await lm.availability();
-      return status === 'readily';
+      return status === 'readily' || status === 'available';
     } catch {
       return false;
     }
   }
 
   async detect(text: string): Promise<DetectedEntity[]> {
+    const heuristics = this.heuristicFallback(text);
     const isReady = await this.isAvailable();
     if (!isReady) {
       // Fallback to local heuristic contextual detection when Gemini Nano is not ready/downloaded
-      return this.heuristicFallback(text);
+      return heuristics;
     }
 
     try {
       const lm = this.windowObj?.LanguageModel || this.windowObj?.ai?.languageModel;
-      if (!lm) return this.heuristicFallback(text);
+      if (!lm) return heuristics;
 
-      const session = await lm.create({ systemPrompt: SEMANTIC_SYSTEM_PROMPT });
+      let session: PromptApiSession;
+      try {
+        session = await lm.create({
+          initialPrompts: [{ role: 'system', content: SEMANTIC_SYSTEM_PROMPT }],
+          expectedInputs: [{ type: 'text', languages: ['en'] }],
+          expectedOutputs: [{ type: 'text', languages: ['en'] }],
+        });
+      } catch {
+        session = await lm.create({ systemPrompt: SEMANTIC_SYSTEM_PROMPT });
+      }
+
       const rawResponse = await session.prompt(text);
       session.destroy();
 
-      return this.parseNanoResponse(text, rawResponse);
+      const nanoEntities = this.parseNanoResponse(text, rawResponse);
+      return [...nanoEntities, ...heuristics];
     } catch {
-      return this.heuristicFallback(text);
+      return heuristics;
     }
   }
 

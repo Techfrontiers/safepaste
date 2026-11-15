@@ -77,7 +77,7 @@ export function SettingsModal({
               </div>
               <span
                 className={`rounded-full px-2.5 py-0.5 font-mono text-[11px] font-semibold ${
-                  nanoStatus === 'readily'
+                  nanoStatus === 'readily' || nanoStatus === 'available'
                     ? 'bg-emerald-500/15 text-emerald-300'
                     : 'bg-amber-500/15 text-amber-300'
                 }`}

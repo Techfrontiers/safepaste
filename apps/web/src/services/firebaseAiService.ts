@@ -25,7 +25,19 @@ import {
   type NetworkAuditEntry,
 } from './networkInspector.ts';
 
-export type NanoAvailability = 'readily' | 'after-download' | 'no' | 'unsupported';
+export type NanoAvailability =
+  | 'readily'
+  | 'available'
+  | 'after-download'
+  | 'downloadable'
+  | 'downloading'
+  | 'no'
+  | 'unavailable'
+  | 'unsupported';
+
+export function isNanoReady(status: NanoAvailability): boolean {
+  return status === 'readily' || status === 'available';
+}
 
 export type WorkspaceTaskType =
   | 'SUMMARIZE'
@@ -113,15 +125,26 @@ export async function checkNanoAvailability(): Promise<NanoAvailability> {
   if (typeof window === 'undefined') return 'unsupported';
   try {
     const win = window as unknown as {
-      LanguageModel?: { availability: () => Promise<NanoAvailability> };
-      ai?: { languageModel?: { availability: () => Promise<NanoAvailability> } };
+      LanguageModel?: {
+        availability: (opts?: Record<string, unknown>) => Promise<NanoAvailability>;
+      };
+      ai?: {
+        languageModel?: {
+          availability: (opts?: Record<string, unknown>) => Promise<NanoAvailability>;
+        };
+      };
     };
     const lm = win.LanguageModel || win.ai?.languageModel;
     if (!lm || typeof lm.availability !== 'function') {
       return 'unsupported';
     }
-    const status = await lm.availability();
-    return status;
+    try {
+      return await lm.availability({
+        expectedOutputs: [{ type: 'text', languages: ['en'] }],
+      });
+    } catch {
+      return await lm.availability();
+    }
   } catch {
     return 'unsupported';
   }
@@ -238,7 +261,7 @@ export async function runContextualNanoScan(
   const latencyMs = Math.round((performance.now() - start) * 100) / 100;
 
   const usedNano =
-    nanoStatus === 'readily' &&
+    isNanoReady(nanoStatus) &&
     sanitizeResult.entities.some((e) => e.method === 'SEMANTIC_NANO');
 
   const executionSource: ExecutionSource = usedNano
@@ -410,17 +433,17 @@ export async function runHybridWorkspaceTask(
 
   // Path 2: Direct Chrome Built-in Gemini Nano when Firebase API key is not configured
   const nanoStatus = await checkNanoAvailability();
-  if (nanoStatus === 'readily' && modeSelection !== 'ONLY_IN_CLOUD') {
+  if (isNanoReady(nanoStatus) && modeSelection !== 'ONLY_IN_CLOUD') {
     const win = window as unknown as {
       LanguageModel?: {
-        create: (opts?: { systemPrompt?: string }) => Promise<{
+        create: (opts?: Record<string, unknown>) => Promise<{
           prompt: (input: string) => Promise<string>;
           destroy: () => void;
         }>;
       };
       ai?: {
         languageModel?: {
-          create: (opts?: { systemPrompt?: string }) => Promise<{
+          create: (opts?: Record<string, unknown>) => Promise<{
             prompt: (input: string) => Promise<string>;
             destroy: () => void;
           }>;
@@ -430,9 +453,20 @@ export async function runHybridWorkspaceTask(
 
     const lm = win.LanguageModel || win.ai?.languageModel;
     if (lm) {
-      const session = await lm.create({
-        systemPrompt: SafePasteEngine.getSystemInstruction(),
-      });
+      let session: { prompt: (input: string) => Promise<string>; destroy: () => void };
+      try {
+        session = await lm.create({
+          initialPrompts: [
+            { role: 'system', content: SafePasteEngine.getSystemInstruction() },
+          ],
+          expectedInputs: [{ type: 'text', languages: ['en'] }],
+          expectedOutputs: [{ type: 'text', languages: ['en'] }],
+        });
+      } catch {
+        session = await lm.create({
+          systemPrompt: SafePasteEngine.getSystemInstruction(),
+        });
+      }
       const outputText = await session.prompt(fullTaskPrompt);
       session.destroy();
       const latencyMs = Math.round((performance.now() - start) * 100) / 100;
