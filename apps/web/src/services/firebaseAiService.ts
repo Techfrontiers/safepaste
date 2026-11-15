@@ -1,3 +1,4 @@
+/// <reference types="vite/client" />
 import { deleteApp, getApps, initializeApp, type FirebaseApp } from 'firebase/app';
 import { initializeAppCheck, ReCaptchaEnterpriseProvider } from 'firebase/app-check';
 import { fetchAndActivate, getRemoteConfig, getValue } from 'firebase/remote-config';
@@ -80,26 +81,47 @@ let currentConnectionState: FirebaseConnectionState = {
 
 const CONFIG_STORAGE_KEY = 'safepaste_firebase_config_v1';
 
+export function isLocalOrExtensionOrigin(): boolean {
+  if (typeof window === 'undefined') return false;
+  const { hostname, protocol } = window.location;
+  return (
+    hostname === 'localhost' ||
+    hostname === '127.0.0.1' ||
+    protocol === 'chrome-extension:'
+  );
+}
+
 export function getDefaultFirebaseConfig(): FirebaseUserConfig {
-  const env =
-    (import.meta as unknown as { env?: Record<string, string | undefined> }).env ?? {};
+  const allowDevDebug = Boolean(import.meta.env.DEV) && isLocalOrExtensionOrigin();
   return {
-    apiKey: env.VITE_FIREBASE_API_KEY?.trim() || '',
-    projectId: env.VITE_FIREBASE_PROJECT_ID?.trim() || '',
-    appId: env.VITE_FIREBASE_APP_ID?.trim() || '',
-    appCheckDebugToken: env.VITE_FIREBASE_APPCHECK_DEBUG_TOKEN?.trim() || '',
-    useDebugAppCheck: env.VITE_FIREBASE_USE_DEBUG_APPCHECK === 'true',
-    recaptchaSiteKey: env.VITE_FIREBASE_RECAPTCHA_SITE_KEY?.trim() || '',
-    modelOverride: env.VITE_FIREBASE_MODEL_OVERRIDE?.trim() || 'gemini-3.8-flash',
+    apiKey: import.meta.env.VITE_FIREBASE_API_KEY?.trim() || '',
+    projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID?.trim() || '',
+    appId: import.meta.env.VITE_FIREBASE_APP_ID?.trim() || '',
+    appCheckDebugToken: allowDevDebug
+      ? import.meta.env.VITE_FIREBASE_APPCHECK_DEBUG_TOKEN?.trim() || ''
+      : '',
+    useDebugAppCheck:
+      allowDevDebug && import.meta.env.VITE_FIREBASE_USE_DEBUG_APPCHECK === 'true',
+    recaptchaSiteKey: import.meta.env.VITE_FIREBASE_RECAPTCHA_SITE_KEY?.trim() || '',
+    modelOverride: import.meta.env.VITE_FIREBASE_MODEL_OVERRIDE?.trim() || 'gemini-3.8-flash',
   };
 }
 
 export function loadSavedFirebaseConfig(): FirebaseUserConfig {
   const defaults = getDefaultFirebaseConfig();
+  const allowDebugOrigin = isLocalOrExtensionOrigin();
   try {
     const raw = localStorage.getItem(CONFIG_STORAGE_KEY);
     if (!raw) return defaults;
     const parsed = JSON.parse(raw) as Partial<FirebaseUserConfig>;
+    const sanitizedDebugToken =
+      allowDebugOrigin && parsed.appCheckDebugToken?.trim()
+        ? parsed.appCheckDebugToken.trim()
+        : defaults.appCheckDebugToken;
+    const sanitizedUseDebug = allowDebugOrigin
+      ? Boolean(parsed.useDebugAppCheck)
+      : false;
+
     return {
       ...defaults,
       ...parsed,
@@ -109,12 +131,8 @@ export function loadSavedFirebaseConfig(): FirebaseUserConfig {
       recaptchaSiteKey: parsed.recaptchaSiteKey?.trim()
         ? parsed.recaptchaSiteKey
         : defaults.recaptchaSiteKey,
-      appCheckDebugToken: parsed.appCheckDebugToken?.trim()
-        ? parsed.appCheckDebugToken
-        : defaults.appCheckDebugToken,
-      useDebugAppCheck: parsed.appCheckDebugToken?.trim()
-        ? Boolean(parsed.useDebugAppCheck)
-        : defaults.useDebugAppCheck,
+      appCheckDebugToken: sanitizedDebugToken,
+      useDebugAppCheck: sanitizedUseDebug,
       modelOverride: parsed.modelOverride?.trim()
         ? parsed.modelOverride
         : defaults.modelOverride,
@@ -199,14 +217,15 @@ export async function initFirebaseServices(
       await deleteApp(app);
     }
 
-    const hasRecaptcha = Boolean(config.recaptchaSiteKey.trim());
-    const hasDebugToken = Boolean(
-      config.useDebugAppCheck && config.appCheckDebugToken.trim()
-    );
+    const siteKey = config.recaptchaSiteKey.trim();
+    const allowDebugOrigin = isLocalOrExtensionOrigin();
+    const allowDebug = allowDebugOrigin && config.useDebugAppCheck;
 
-    if (config.useDebugAppCheck) {
+    if (allowDebug) {
       (self as unknown as Record<string, unknown>).FIREBASE_APPCHECK_DEBUG_TOKEN =
         config.appCheckDebugToken.trim() || true;
+    } else if (!allowDebugOrigin) {
+      delete (self as unknown as Record<string, unknown>).FIREBASE_APPCHECK_DEBUG_TOKEN;
     }
 
     cachedApp = initializeApp({
@@ -216,16 +235,8 @@ export async function initFirebaseServices(
     });
 
     let appCheckActive = false;
-    if (hasRecaptcha || hasDebugToken) {
+    if (siteKey) {
       try {
-        if (config.useDebugAppCheck) {
-          (self as unknown as Record<string, unknown>).FIREBASE_APPCHECK_DEBUG_TOKEN =
-            config.appCheckDebugToken.trim() || true;
-        }
-
-        const siteKey =
-          config.recaptchaSiteKey.trim() || '6LeIxAcTAAAAAJcZVRqyHh71UMIEGNQ_MXjiZKhI';
-
         initializeAppCheck(cachedApp, {
           provider: new ReCaptchaEnterpriseProvider(siteKey),
           isTokenAutoRefreshEnabled: true,
