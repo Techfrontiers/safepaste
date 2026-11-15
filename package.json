@@ -1,0 +1,27 @@
+{
+  "name": "safepaste-monorepo",
+  "version": "0.1.0",
+  "private": true,
+  "description": "SafePaste AI — Your Private Gateway to AI. Powered by Google Firebase AI Logic Hybrid Inference.",
+  "workspaces": [
+    "packages/*",
+    "apps/*"
+  ],
+  "scripts": {
+    "test": "npm run test --workspaces --if-present",
+    "build": "npm run build --workspaces --if-present"
+  },
+  "keywords": [
+    "safepaste",
+    "firebase-ai",
+    "hybrid-inference",
+    "gemini-nano",
+    "privacy",
+    "chrome-extension"
+  ],
+  "author": "Techfrontiers",
+  "license": "Apache-2.0",
+  "devDependencies": {
+    "typescript": "^7.0.2"
+  }
+}

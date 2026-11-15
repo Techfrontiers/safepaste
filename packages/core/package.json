@@ -1,0 +1,25 @@
+{
+  "name": "@safepaste/core",
+  "version": "0.1.0",
+  "type": "module",
+  "description": "Core privacy detection, invariant tokenization, and safe rehydration engine for SafePaste AI",
+  "main": "dist/index.js",
+  "module": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "build": "tsc",
+    "test": "node --test tests/**/*.test.js || vitest run"
+  },
+  "keywords": [
+    "privacy",
+    "pii-detection",
+    "tokenization",
+    "rehydration",
+    "hybrid-ai"
+  ],
+  "author": "Techfrontiers",
+  "license": "Apache-2.0",
+  "devDependencies": {
+    "typescript": "^5.7.0"
+  }
+}
