@@ -3,12 +3,18 @@
   "version": "0.1.0",
   "type": "module",
   "description": "Core privacy detection, invariant tokenization, and safe rehydration engine for SafePaste AI",
-  "main": "dist/index.js",
-  "module": "dist/index.js",
-  "types": "dist/index.d.ts",
+  "main": "./dist/index.js",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
   "scripts": {
     "build": "tsc",
-    "test": "node --test tests/**/*.test.js || vitest run"
+    "test": "node --test tests/deterministic.test.js tests/tokenizer_rehydration.test.js tests/engine.test.js"
   },
   "keywords": [
     "privacy",

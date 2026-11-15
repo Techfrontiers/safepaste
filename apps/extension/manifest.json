@@ -1,0 +1,32 @@
+{
+  "manifest_version": 3,
+  "name": "SafePaste AI — Private Hybrid AI Gateway",
+  "version": "0.1.0",
+  "description": "Protect API keys, PII, and business secrets on-device with Gemini Nano & Firebase AI Logic before sending prompts to Cloud AI.",
+  "permissions": [
+    "sidePanel",
+    "storage",
+    "activeTab",
+    "contextMenus"
+  ],
+  "action": {
+    "default_title": "Open SafePaste AI Privacy Gateway"
+  },
+  "side_panel": {
+    "default_path": "index.html"
+  },
+  "background": {
+    "service_worker": "background.js"
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "https://chatgpt.com/*",
+        "https://claude.ai/*",
+        "https://gemini.google.com/*"
+      ],
+      "js": ["content.js"],
+      "run_at": "document_idle"
+    }
+  ]
+}

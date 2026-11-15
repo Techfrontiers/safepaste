@@ -8,8 +8,10 @@
     "apps/*"
   ],
   "scripts": {
+    "dev": "npm run dev --workspace=@safepaste/web",
     "test": "npm run test --workspaces --if-present",
-    "build": "npm run build --workspaces --if-present"
+    "build": "npm run build --workspace=@safepaste/core && npm run build --workspace=@safepaste/web",
+    "build:extension": "node scripts/build-extension.mjs"
   },
   "keywords": [
     "safepaste",

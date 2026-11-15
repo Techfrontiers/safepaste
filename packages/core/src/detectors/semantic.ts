@@ -129,7 +129,7 @@ export class NanoSemanticDetector implements ISemanticDetector {
     }
 
     // Pattern B: Secret project indicators (e.g. Project Pegasus, Operation Phoenix)
-    const projectPattern = /\b(?:Project|Operation|โปรเจกต์|โครงการ)\s+([A-Za-z0-9_-]+)\b/gi;
+    const projectPattern = /(?<![a-zA-Z0-9_])(?:Project|Operation|โปรเจกต์|โครงการ)\s+([ก-๙A-Za-z0-9_-]+)(?![a-zA-Z0-9_])/gi;
     while ((match = projectPattern.exec(text)) !== null) {
       entities.push({
         id: `nano_project_${counter++}`,
@@ -139,6 +139,34 @@ export class NanoSemanticDetector implements ISemanticDetector {
         endIndex: match.index + match[0].length,
         method: 'SEMANTIC_NANO',
         confidence: 0.88,
+      });
+    }
+
+    // Pattern C: Person names with Thai or English honorifics/titles
+    const personPattern = /(?:คุณ\s*[ก-๙A-Za-z]+|(?:นาย|นางสาว|นาง|ดร\.)\s+[ก-๙A-Za-z]+(?:\s+[ก-๙A-Za-z]+)?|(?:CEO|CFO|CTO|Mr\.|Ms\.|Mrs\.|Dr\.)\s+[A-Z][A-Za-z]+(?:\s+[A-Z][A-Za-z]+)?)/g;
+    while ((match = personPattern.exec(text)) !== null) {
+      entities.push({
+        id: `nano_person_${counter++}`,
+        category: 'PERSON',
+        rawValue: match[0],
+        startIndex: match.index,
+        endIndex: match.index + match[0].length,
+        method: 'SEMANTIC_NANO',
+        confidence: 0.86,
+      });
+    }
+
+    // Pattern D: Thai and English organization/company names
+    const orgPattern = /(?:บริษัท\s+[ก-๙A-Za-z0-9_.-]+(?:\s+จำกัด(?:\s*\(มหาชน\))?)?|\b[A-Z][A-Za-z0-9&-]+\s+(?:Corp|Corporation|Inc|Ltd|LLC|Group|Enterprise|Technologies|Bank)\b)/g;
+    while ((match = orgPattern.exec(text)) !== null) {
+      entities.push({
+        id: `nano_org_${counter++}`,
+        category: 'ORGANIZATION',
+        rawValue: match[0],
+        startIndex: match.index,
+        endIndex: match.index + match[0].length,
+        method: 'SEMANTIC_NANO',
+        confidence: 0.87,
       });
     }
 
